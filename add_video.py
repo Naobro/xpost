@@ -38,9 +38,15 @@ video_file = st.file_uploader("サンプル動画 (mp4のみ)", type=["mp4"])
 # ✅ 動画アップロード
 def upload_video_to_wp(video_file):
     url = f"{WP_API_URL}/media"
-    headers = {"Content-Disposition": f'attachment; filename="{video_file.name}"'}
+    headers = {
+        "Content-Disposition": f'attachment; filename="{video_file.name}"',
+        "Content-Type": "video/mp4"  # ← これを追加！
+    }
     auth = HTTPBasicAuth(WP_USER, WP_APP_PASSWORD)
     res = requests.post(url, headers=headers, auth=auth, files={"file": video_file.getbuffer()})
+    
+    st.write("📡 アップロード結果:", res.status_code, res.text)  # ← デバッグ用に追加
+
     if res.status_code in [200, 201]:
         return res.json().get("source_url")
     return None
@@ -51,6 +57,9 @@ def create_wp_post(title, content, category_id):
     auth = HTTPBasicAuth(WP_USER, WP_APP_PASSWORD)
     post = {"title": title, "content": content, "status": "publish", "categories": [category_id]}
     res = requests.post(url, auth=auth, json=post)
+    
+    st.write("📡 投稿結果:", res.status_code, res.text)  # ← デバッグ用に追加
+
     return res.status_code in [200, 201]
 
 # ✅ ボタン押下時
@@ -66,7 +75,6 @@ if st.button("✅ 動画をアップロード & 投稿"):
             if create_wp_post(title, content, category_id):
                 st.success("✅ WordPressに投稿しました！")
 
-                # CSVに保存
                 new_row = pd.DataFrame([[title, category_name, tweet_text, script, video_url]],
                                        columns=["title", "category", "tweet_text", "script", "video_url"])
                 df = pd.concat([df, new_row], ignore_index=True)
