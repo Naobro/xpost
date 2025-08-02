@@ -139,3 +139,5 @@ if st.button("✅ 投稿する"):
 
 st.subheader("📄 登録済み広告リスト")
 st.dataframe(df)
+
+st.markdown("[➡ 手動ツイート管理ページへ移動](manual_tweet.py)")
