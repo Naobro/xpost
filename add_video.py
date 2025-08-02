@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
 import os
+import re
 import requests
 from requests.auth import HTTPBasicAuth
-from PIL import Image
-from io import BytesIO
 import tempfile
 from config import WP_USER, WP_APP_PASSWORD, WP_API_URL, CSV_FILE
 
-st.title("📹 アフィリエイト広告登録 & WordPress投稿（動画アップなし）")
+st.title("📹 アフィリエイト広告登録 & WordPress投稿（サムネ自動取得）")
 
 # ✅ WordPressカテゴリ一覧取得
 def get_wp_categories():
@@ -69,25 +68,10 @@ def create_wp_post(title, content, category_id, featured_image_id=None):
         st.error(f"記事投稿失敗: {res.status_code} {res.text}")
         return False
 
-# ✅ スクリプトタグから img=URL を抽出
-def extract_img_url(script_text):
-    import re
-    match = re.search(r"img=(https?://[^\s&\"]+)", script_text)
+# ✅ scriptタグからサムネイルURL抽出
+def extract_thumbnail_url(script_text):
+    match = re.search(r"img=(https?://[^\s&]+)", script_text)
     return match.group(1) if match else None
-
-# ✅ 外部URLからJPEG化してアップロード
-def download_and_convert_to_jpeg(image_url):
-    try:
-        res = requests.get(image_url, timeout=10)
-        res.raise_for_status()
-        img = Image.open(BytesIO(res.content)).convert("RGB")
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            img.save(tmp.name, format="JPEG")
-            return tmp.name
-    except Exception as e:
-        st.error(f"画像取得失敗: {e}")
-        return None
 
 # ✅ 入力フォーム
 st.subheader("🎥 新しい広告を追加")
@@ -97,37 +81,38 @@ tweet_text = st.text_area("ツイート本文 (tweet_text)")
 script = st.text_area("広告スクリプトタグ (script)")
 
 # ✅ ボタン押下時
-if st.button("✅ 投稿する（動画なし）"):
+if st.button("✅ 投稿する（サムネ自動取得）"):
     if title and tweet_text and script:
-        with st.spinner("📤 サムネイルを取得してアップロード中..."):
-            img_url = extract_img_url(script)
+        if title in df["title"].values:
+            st.warning("⚠️ このタイトルは既に登録済みです。スキップします。")
+        else:
+            thumb_url = extract_thumbnail_url(script)
+            thumb_id, uploaded_thumb_url = None, None
 
-            if img_url:
-                jpeg_path = download_and_convert_to_jpeg(img_url)
-                if jpeg_path:
-                    thumb_id, thumb_url = upload_media_to_wp(jpeg_path, "thumbnail.jpg", "image/jpeg")
-                else:
-                    thumb_id, thumb_url = None, None
-            else:
-                st.error("❌ スクリプトから画像URLを取得できませんでした")
-                thumb_id, thumb_url = None, None
+            if thumb_url:
+                try:
+                    res = requests.get(thumb_url, stream=True)
+                    if res.status_code == 200:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_img:
+                            tmp_img.write(res.content)
+                            tmp_img_path = tmp_img.name
+                        thumb_id, uploaded_thumb_url = upload_media_to_wp(tmp_img_path, "thumbnail.jpg", "image/jpeg")
+                except Exception as e:
+                    st.error(f"サムネイル取得失敗: {e}")
 
-            # ✅ WordPress記事作成
-            content = f"{script}\n\n<p>サンプル動画👇</p>"
+            content = f"<p>{tweet_text}</p>\n\n{script}"
             category_id = categories.get(category_name, 1)
 
             if create_wp_post(title, content, category_id, featured_image_id=thumb_id):
                 st.success("✅ WordPressに投稿しました！")
 
                 new_row = pd.DataFrame(
-                    [[title, category_name, tweet_text, script, thumb_url if thumb_url else ""]],
+                    [[title, category_name, tweet_text, script, uploaded_thumb_url or ""]],
                     columns=["title", "category", "tweet_text", "script", "thumbnail_url"]
                 )
                 df = pd.concat([df, new_row], ignore_index=True)
                 df.to_csv(CSV_FILE, index=False)
                 st.success("✅ CSVに追加しました！")
-            else:
-                st.error("❌ WordPress記事投稿に失敗しました")
     else:
         st.error("❌ すべての項目を入力してください")
 
