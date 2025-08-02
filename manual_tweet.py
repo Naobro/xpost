@@ -2,13 +2,11 @@ import streamlit as st
 import pandas as pd
 import os
 import tweepy
-from config import API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
+from config import API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET, CSV_FILE
 
-CSV_FILE = "affiliate_videos.csv"
+st.title("🐦 手動ツイート管理ツール（タグ対応）")
 
-st.title("🐦 手動ツイート管理ツール")
-
-# ✅ CSVを読み込む
+# ✅ CSV読み込み
 if os.path.exists(CSV_FILE):
     df = pd.read_csv(CSV_FILE)
 else:
@@ -31,10 +29,10 @@ with tab2:
 # ✅ ツイート対象の選択
 video_titles = df[df["posted"] == False]["title"].tolist()
 if video_titles:
-    selected_title = st.selectbox("ツイートする動画を選択", video_titles)
+    selected_title = st.selectbox("ツイートする広告を選択", video_titles)
     tweet_button = st.button("🐦 ツイートする")
 else:
-    st.info("未投稿の動画がありません。")
+    st.info("未投稿の広告がありません。")
     selected_title = None
     tweet_button = False
 
@@ -44,20 +42,20 @@ def get_twitter_api():
     return tweepy.API(auth)
 
 # ✅ ツイート送信
-def post_tweet(api, text, video_url):
+def post_tweet(api, text, video_url, tags):
     try:
-        tweet_text = f"{text}\n\n動画はこちら👇\n{video_url}"
+        tweet_text = f"{text}\n\n{tags}\n\n{video_url}"
         api.update_status(tweet_text)
         return True
     except Exception as e:
         st.error(f"❌ ツイート失敗: {e}")
         return False
 
-# ✅ ボタンが押されたらツイート
+# ✅ ツイート実行
 if tweet_button and selected_title:
     api = get_twitter_api()
     row = df[df["title"] == selected_title].iloc[0]
-    success = post_tweet(api, row["tweet_text"], row["video_url"])
+    success = post_tweet(api, row["tweet_text"], row["thumbnail_url"], row.get("tags", ""))
 
     if success:
         st.success(f"✅ ツイートしました: {selected_title}")

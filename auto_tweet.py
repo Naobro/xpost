@@ -10,8 +10,8 @@ def tweet_video():
         print("⚠️ CSVが空です。ツイート対象なし。")
         return
 
-    row = df.iloc[0]
-    text = f"{row['title']}\n\n{row['tweet_text']}\n\n{row['video_url']}"
+    row = df[df["posted"] == False].iloc[0]
+    text = f"{row['tweet_text']}\n\n{row.get('tags', '')}\n\n{row['thumbnail_url']}"
 
     auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
     api = tweepy.API(auth)
@@ -20,9 +20,9 @@ def tweet_video():
         api.update_status(status=text)
         print(f"✅ ツイート成功: {row['title']}")
 
-        df = df.drop(index=0)
+        df.loc[df.index[0], "posted"] = True
         df.to_csv(CSV_FILE, index=False)
-        print("✅ CSVから削除しました")
+        print("✅ CSVを更新しました（posted=True）")
     except Exception as e:
         print(f"❌ ツイート失敗: {e}")
 
