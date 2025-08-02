@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 import requests
-import re
-import tempfile
 from requests.auth import HTTPBasicAuth
+from PIL import Image
+from io import BytesIO
+import tempfile
 from config import WP_USER, WP_APP_PASSWORD, WP_API_URL, CSV_FILE
 
-st.title("📹 アフィリエイト広告登録 & WordPress投稿（サムネ自動取得）")
+st.title("📹 アフィリエイト広告登録 & WordPress投稿（動画アップなし）")
 
 # ✅ WordPressカテゴリ一覧取得
 def get_wp_categories():
@@ -28,34 +29,25 @@ if os.path.exists(CSV_FILE):
 else:
     df = pd.DataFrame(columns=["title", "category", "tweet_text", "script", "thumbnail_url"])
 
-# ✅ 画像URLからダウンロードしてWPにアップロード
-def upload_image_from_url(image_url):
-    try:
-        img_data = requests.get(image_url, timeout=10).content
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_img:
-            tmp_img.write(img_data)
-            tmp_img_path = tmp_img.name
+# ✅ WordPress メディアアップロード関数
+def upload_media_to_wp(file_path, file_name, mime_type):
+    url = f"{WP_API_URL}/media"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{file_name}"',
+        "Content-Type": mime_type
+    }
+    auth = HTTPBasicAuth(WP_USER, WP_APP_PASSWORD)
 
-        url = f"{WP_API_URL}/media"
-        headers = {
-            "Content-Disposition": 'attachment; filename="thumbnail.jpg"',
-            "Content-Type": "image/jpeg"
-        }
-        auth = HTTPBasicAuth(WP_USER, WP_APP_PASSWORD)
+    with open(file_path, "rb") as f:
+        res = requests.post(url, headers=headers, auth=auth, files={"file": f})
 
-        with open(tmp_img_path, "rb") as f:
-            res = requests.post(url, headers=headers, auth=auth, files={"file": f})
-
-        if res.status_code in [200, 201]:
-            return res.json().get("id"), res.json().get("source_url")
-        else:
-            st.error(f"メディアアップロード失敗: {res.status_code} {res.text}")
-            return None, None
-    except Exception as e:
-        st.error(f"画像取得エラー: {e}")
+    if res.status_code in [200, 201]:
+        return res.json().get("id"), res.json().get("source_url")
+    else:
+        st.error(f"メディアアップロード失敗: {res.status_code} {res.text}")
         return None, None
 
-# ✅ WordPress 投稿作成
+# ✅ WordPress 投稿作成関数
 def create_wp_post(title, content, category_id, featured_image_id=None):
     url = f"{WP_API_URL}/posts"
     auth = HTTPBasicAuth(WP_USER, WP_APP_PASSWORD)
@@ -77,12 +69,25 @@ def create_wp_post(title, content, category_id, featured_image_id=None):
         st.error(f"記事投稿失敗: {res.status_code} {res.text}")
         return False
 
-# ✅ スクリプトから img= のURLを取得
+# ✅ スクリプトタグから img=URL を抽出
 def extract_img_url(script_text):
-    match = re.search(r'img=(https?://[^\s"&]+)', script_text)
-    if match:
-        return match.group(1)
-    return None
+    import re
+    match = re.search(r"img=(https?://[^\s&\"]+)", script_text)
+    return match.group(1) if match else None
+
+# ✅ 外部URLからJPEG化してアップロード
+def download_and_convert_to_jpeg(image_url):
+    try:
+        res = requests.get(image_url, timeout=10)
+        res.raise_for_status()
+        img = Image.open(BytesIO(res.content)).convert("RGB")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            img.save(tmp.name, format="JPEG")
+            return tmp.name
+    except Exception as e:
+        st.error(f"画像取得失敗: {e}")
+        return None
 
 # ✅ 入力フォーム
 st.subheader("🎥 新しい広告を追加")
@@ -94,17 +99,22 @@ script = st.text_area("広告スクリプトタグ (script)")
 # ✅ ボタン押下時
 if st.button("✅ 投稿する（動画なし）"):
     if title and tweet_text and script:
-        with st.spinner("📤 サムネイル取得中..."):
+        with st.spinner("📤 サムネイルを取得してアップロード中..."):
             img_url = extract_img_url(script)
 
             if img_url:
-                thumb_id, thumb_url = upload_image_from_url(img_url)
+                jpeg_path = download_and_convert_to_jpeg(img_url)
+                if jpeg_path:
+                    thumb_id, thumb_url = upload_media_to_wp(jpeg_path, "thumbnail.jpg", "image/jpeg")
+                else:
+                    thumb_id, thumb_url = None, None
             else:
+                st.error("❌ スクリプトから画像URLを取得できませんでした")
                 thumb_id, thumb_url = None, None
-                st.warning("⚠️ スクリプト内に img= が見つかりませんでした。")
 
-            category_id = categories.get(category_name, 1)
+            # ✅ WordPress記事作成
             content = f"{script}\n\n<p>サンプル動画👇</p>"
+            category_id = categories.get(category_name, 1)
 
             if create_wp_post(title, content, category_id, featured_image_id=thumb_id):
                 st.success("✅ WordPressに投稿しました！")
